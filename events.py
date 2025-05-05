@@ -3,7 +3,7 @@ import discord
 from database import BotDatabase
 from utils import DAILY_COOLDOWN
 
-def setup(bot):
+def setup(bot, db):
     @bot.event
     async def on_ready():
         print(f"Logged in as {bot.user}")

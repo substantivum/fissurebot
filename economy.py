@@ -3,8 +3,92 @@ import discord
 from discord.ui import View, Button
 from database import BotDatabase
 from utils import logger, DAILY_COOLDOWN
+import random
+import time
+from datetime import datetime 
 
 def setup(bot, db):
+    
+    @bot.command(name="help")
+    async def bothelp_command(ctx):
+        embed = discord.Embed(
+            title="📚 Список команд бота",
+            description="Все доступные команды разделены по категориям",
+            color=0x00ffcc
+        )
+
+        # Music Commands
+        embed.add_field(
+            name="🎵 Музыкальные команды",
+            value="""
+            `!play <url>` - Проиграть песню с YouTube
+            `!queue` - Показать очередь
+            `!skip` - Пропустить песню
+            `!clearqueue` - Очистить очередь
+            `!shufflequeue` - Перемешать очередь
+            `!stop` - Остановить музыку
+            `!join` - Подключиться к голосу
+            `!leave` - Покинуть голосовой канал
+            `!volume <0.0-2.0>` - Изменить громкость
+            `!nowplaying` - Текущая песня
+            """,
+            inline=False
+        )
+
+        # Economy Commands
+        embed.add_field(
+            name="💰 Экономика",
+            value="""
+            `!balance` - Проверить баланс
+            `!fissdaily` - Получить ежедневную награду
+            `!pay @user amount` - Передать монеты
+            `!leaderboard` - Таблица лидеров
+            """,
+            inline=False
+        )
+
+        # Statistics Commands
+        embed.add_field(
+            name="📊 Статистика",
+            value="""
+            `!level` - Проверить уровень и опыт
+            `!activity` - Статистика активности
+            `!topactivity` - Топ по активности
+            """,
+            inline=False
+        )
+
+        # Role Shop Commands
+        embed.add_field(
+            name="🎖️ Магазин ролей",
+            value="`!roleshop` - Посмотреть доступные роли",
+            inline=False
+        )
+
+        # Admin Commands
+        if ctx.author.guild_permissions.administrator:
+            embed.add_field(
+                name="🔒 Админ-команды",
+                value="""
+                `!adminpanel` - Открыть админ-панель
+                `!addrole <name> <price>` - Добавить роль
+                `!removerole <name>` - Удалить роль
+                `!setprice <name> <price>` - Изменить цену
+                `!givecoins @user <amount>` - Выдать монеты
+                `!resetuser @user` - Сбросить данные
+                `!broadcast <message>` - Объявление
+                `!cleardb` - Очистить базу
+                `!shutdown` - Выключить бота
+                `!clear_downloads` - Очистить загрузки
+                """,
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Запрошено {ctx.author.display_name}", icon_url=ctx.author.avatar.url)
+        
+        await ctx.send(embed=embed)
+    
+    
     @bot.command(name="fissdaily")
     async def fissdaily(ctx):
         user_id = str(ctx.author.id)

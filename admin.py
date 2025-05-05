@@ -4,6 +4,8 @@ from discord.ui import View, Button, Modal, TextInput
 from database import BotDatabase
 from utils import logger
 from discord.ext import commands  # Обязательно добавьте этот импорт
+import os  # Needed for clear_downloads
+import shutil
 
 def is_admin():
     """Проверка прав администратора"""
@@ -16,6 +18,51 @@ def is_admin():
 
 def setup(bot, db):
     """Регистрация админ-команд бота"""
+    bot.remove_command('help')
+    
+    @bot.command(name="bothelp")
+    async def bothelp_command(ctx):
+        help_message = """
+        **Музыкальные команды:**
+        - `!play <url>`: Проиграть песню с YouTube
+        - `!queue`: Показать очередь
+        - `!skip`: Пропустить песню
+        - `!clearqueue`: Очистить очередь
+        - `!shufflequeue`: Перемешать очередь
+        - `!stop`: Остановить музыку
+        - `!join`: Подключиться к голосу
+        - `!leave`: Покинуть голосовой канал
+        - `!volume <0.0-2.0>`: Изменить громкость
+        - `!nowplaying`: Текущая песня
+
+        **Экономика:**
+        - `!balance`: Проверить баланс
+        - `!fissdaily`: Получить ежедневную награду
+        - `!pay @user amount`: Передать монеты
+        - `!leaderboard`: Посмотреть таблицу лидеров
+
+        **Статистика:**
+        - `!level`: Проверить уровень и опыт
+        - `!activity`: Статистика активности
+        - `!topactivity`: Топ по активности
+
+        **Магазин ролей:**
+        - `!roleshop`: Посмотреть доступные роли
+
+        **Админ-команды:**
+        - `!adminpanel`: Открыть админ-панель
+        - `!addrole <name> <price>`: Добавить роль в магазин
+        - `!removerole <name>`: Удалить роль из магазина
+        - `!setprice <name> <price>`: Изменить цену роли
+        - `!givecoins @user <amount>`: Выдать монеты
+        - `!resetuser @user`: Сбросить данные пользователя
+        - `!broadcast <message>`: Отправить сообщение всем серверам
+        - `!cleardb`: Очистить всю базу
+        - `!shutdown`: Выключить бота
+        - `!clear_downloads`: Очистить загрузки
+        """
+        await ctx.send(help_message)
+
     
     @bot.command(name="adminpanel")
     @is_admin()
@@ -23,61 +70,114 @@ def setup(bot, db):
         class AdminPanelView(View):
             def __init__(self):
                 super().__init__(timeout=None)
-                self.load_roles()
+                
+                # Add buttons directly in __init__
+                self.add_item(self.AddRoleButton())
+                self.add_item(self.RemoveRoleButton())
+                self.add_item(self.SetPriceButton())
+            
+            class AddRoleButton(Button):
+                def __init__(self):
+                    super().__init__(
+                        label="Добавить роль",
+                        style=discord.ButtonStyle.primary
+                    )
+                
+                async def callback(self, interaction: discord.Interaction):
+                    class AddRoleModal(Modal, title="Добавить роль в магазин"):
+                        role_name = TextInput(label="Название роли")
+                        role_price = TextInput(label="Цена", placeholder="Введите цену в fissure coins")
+                        
+                        async def on_submit(self, interaction: discord.Interaction):
+                            cursor = db.conn.cursor()
+                            cursor.execute("INSERT OR IGNORE INTO role_shop (role_name, price) VALUES (?, ?)", 
+                                        (self.role_name.value, int(self.role_price.value)))
+                            db.conn.commit()
+                            await interaction.response.send_message(
+                                f"✅ Роль `{self.role_name.value}` добавлена за {self.role_price.value} fissure coins", 
+                                ephemeral=True
+                            )
+                    
+                    await interaction.response.send_modal(AddRoleModal())
+            
+            class RemoveRoleButton(Button):
+                def __init__(self):
+                    super().__init__(
+                        label="Удалить роль",
+                        style=discord.ButtonStyle.danger
+                    )
+                
+                async def callback(self, interaction: discord.Interaction):
+                    class RemoveRoleSelect(discord.ui.Select):
+                        def __init__(self):
+                            cursor = db.conn.cursor()
+                            cursor.execute("SELECT role_name FROM role_shop")
+                            roles = cursor.fetchall()
+                            options = [discord.SelectOption(label=role[0]) for role in roles]
+                            super().__init__(placeholder="Выберите роль для удаления", options=options)
+                        
+                        async def callback(self, interaction: discord.Interaction):
+                            role_name = self.values[0]
+                            cursor = db.conn.cursor()
+                            cursor.execute("DELETE FROM role_shop WHERE role_name=?", (role_name,))
+                            db.conn.commit()
+                            await interaction.response.send_message(
+                                f"✅ Роль `{role_name}` удалена из магазина", 
+                                ephemeral=True
+                            )
+                    
+                    view = View()
+                    view.add_item(RemoveRoleSelect())
+                    await interaction.response.send_message(
+                        "🗑️ Выберите роль для удаления:", 
+                        view=view, 
+                        ephemeral=True
+                    )
+            
+            class SetPriceButton(Button):
+                def __init__(self):
+                    super().__init__(
+                        label="Изменить цену",
+                        style=discord.ButtonStyle.secondary
+                    )
+                
+                async def callback(self, interaction: discord.Interaction):
+                    class SetPriceModal(Modal, title="Изменить цену роли"):
+                        role_name = TextInput(label="Название роли")
+                        new_price = TextInput(label="Новая цена")
+                        
+                        async def on_submit(self, interaction: discord.Interaction):
+                            cursor = db.conn.cursor()
+                            cursor.execute("UPDATE role_shop SET price=? WHERE role_name=?", 
+                                        (int(self.new_price.value), self.role_name.value))
+                            db.conn.commit()
+                            await interaction.response.send_message(
+                                f"✅ Цена роли `{self.role_name.value}` изменена на {self.new_price.value} fissure coins", 
+                                ephemeral=True
+                            )
+                    
+                    await interaction.response.send_modal(SetPriceModal())
 
-            def load_roles(self):
-                cursor = db.conn.cursor()
-                cursor.execute("SELECT role_name FROM role_shop")
-                self.roles = cursor.fetchall()
-
-            async def interaction_check(self, interaction: discord.Interaction):
-                return not interaction.user.bot
-
-            async def create_button_callback(self, role_name: str, price: int):
-                async def button_callback(interaction: discord.Interaction):
-                    user_id = str(interaction.user.id)
-                    guild = interaction.guild
-                    role = discord.utils.get(guild.roles, name=role_name)
-
-                    if not role:
-                        await interaction.response.send_message(f"❌ Роль `{role_name}` не найдена на сервере.", ephemeral=True)
-                        return
-
-                    if role in interaction.user.roles:
-                        await interaction.response.send_message(f"❌ У вас уже есть роль `{role_name}`.", ephemeral=True)
-                        return
-
-                    cursor = db.conn.cursor()
-                    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-                    result = cursor.fetchone()
-                    balance = result[0] if result else 0
-
-                    if balance < price:
-                        await interaction.response.send_message(f"❌ Недостаточно средств для покупки `{role_name}`.", ephemeral=True)
-                        return
-
-                    db.update_balance(user_id, -price)
-                    await interaction.user.add_roles(role)
-                    await interaction.response.send_message(f"✅ Куплена роль `{role_name}` за {price} fissure coins!", ephemeral=True)
-
-                return button_callback
-
-        embed = discord.Embed(title="🔒 Админ-панель", description="Доступ только для администраторов", color=0x00ffcc)
-        view = AdminPanelView()
-
-        for role_name, price in view.roles:
-            embed.add_field(name=role_name, value=f"{price} fissure coins", inline=False)
-
-        for role_name, price in view.roles:
-            button = Button(
-                label=f"Купить {role_name}", 
-                custom_id=f"buyrole_{role_name.lower()}", 
-                style=discord.ButtonStyle.primary
-            )
-            button.callback = await view.create_button_callback(role_name, price)
-            view.add_item(button)
-
-        await ctx.send(embed=embed, view=view)
+        embed = discord.Embed(
+            title="🔒 Админ-панель", 
+            description="Доступ только для администраторов", 
+            color=0x00ffcc
+        )
+        embed.add_field(
+            name="🛠️ Доступные действия", 
+            value="""
+            - Добавление ролей
+            - Удаление ролей
+            - Изменение цен
+            - Выдача монет
+            - Сброс данных
+            - Отправка объявления
+            - Очистка базы данных
+            """, 
+            inline=False
+        )
+        
+        await ctx.send(embed=embed, view=AdminPanelView())
 
     @bot.command(name="addrole")
     @is_admin()
