@@ -68,11 +68,14 @@ def get_required_exp(level: int) -> int:
     return 100 * (2 ** (level - 1))
 
 async def handle_message_xp(bot, db, message, xp_gain=5):
+    if message.author.bot:
+        return
+
     user_id = str(message.author.id)
     user_data = db.get_user(user_id)
-    
-    if user_data is None:
-        db.create_user(user_id)  # Optional: handle first-time users
+
+    if not user_data:
+        db.create_user(user_id)
         user_data = db.get_user(user_id)
 
     level = user_data["level"]
@@ -86,14 +89,10 @@ async def handle_message_xp(bot, db, message, xp_gain=5):
 
     db.update_level_and_exp(user_id, level, exp)
 
-    # Optional: Notify user of level-up
     if leveled_up:
         try:
-            embed = discord.Embed(
-                title="🎉 Повышение уровня!",
-                description=f"{message.author.mention} достиг уровня {level}!",
-                color=0x00ffcc
+            await message.channel.send(
+                f"🎉 {message.author.mention} повысил(а) уровень до **{level}**! Поздравляем!"
             )
-            await message.channel.send(embed=embed)
-        except Exception as e:
-            print(f"Error sending level up message: {e}")
+        except discord.Forbidden:
+            pass  # Нет прав на отправку сообщений в канал

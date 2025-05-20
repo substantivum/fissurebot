@@ -15,11 +15,18 @@ def setup(bot, db):
             await ctx.send("❌ Нельзя вызвать самого себя или бота на дуэль.")
             return
 
+        if bet <= 0:
+            await ctx.send("❌ Ставка должна быть положительным числом.")
+            return
+
         challenger_data = db.get_user(challenger_id)
         opponent_data = db.get_user(opponent_id)
 
-        if challenger_data["experience"] < bet or opponent_data["experience"] < bet:
-            await ctx.send("❌ У одного из игроков недостаточно опыта для ставки.")
+        if challenger_data["balance"] < bet:
+            await ctx.send("💸 У тебя недостаточно монет для этой ставки.")
+            return
+        if opponent_data["balance"] < bet:
+            await ctx.send("💸 У соперника недостаточно монет для этой ставки.")
             return
 
         if opponent_id in pending_duels:
@@ -32,7 +39,7 @@ def setup(bot, db):
             "channel_id": ctx.channel.id
         }
 
-        await ctx.send(f"⚔️ {ctx.author.mention} вызвал {opponent.mention} на дуэль на **{bet}** опыта!\n"
+        await ctx.send(f"⚔️ {ctx.author.mention} вызвал {opponent.mention} на дуэль на **{bet}** монет!\n"
                        f"{opponent.mention}, напиши `!accept` в течение 60 секунд, чтобы принять.")
 
     @bot.command(name="accept")
@@ -51,24 +58,24 @@ def setup(bot, db):
         challenger_data = db.get_user(challenger_id)
         opponent_data = db.get_user(user_id)
 
-        if challenger_data["experience"] < bet or opponent_data["experience"] < bet:
-            await channel.send("❌ Один из участников больше не имеет нужного количества опыта.")
+        if challenger_data["balance"] < bet or opponent_data["balance"] < bet:
+            await channel.send("❌ Один из участников больше не имеет нужного количества монет.")
             return
 
         # Определяем победителя
         winner_id = random.choice([challenger_id, user_id])
         loser_id = challenger_id if winner_id == user_id else user_id
 
-        db.update_experience(winner_id, bet)
-        db.update_experience(loser_id, -bet)
+        db.update_balance(winner_id, bet)
+        db.update_balance(loser_id, -bet)
 
         winner = await bot.fetch_user(int(winner_id))
         loser = await bot.fetch_user(int(loser_id))
 
         embed = discord.Embed(title="🏁 Результаты дуэли", color=0xFF5733)
         embed.add_field(name="🎯 Победитель", value=winner.display_name, inline=False)
-        embed.add_field(name="💥 Проигравший", value=loser.display_name, inline=False)
-        embed.add_field(name="💰 Ставка", value=f"{bet} опыта", inline=False)
+        embed.add_field(name="💀 Проигравший", value=loser.display_name, inline=False)
+        embed.add_field(name="💰 Ставка", value=f"{bet} монет", inline=False)
         await channel.send(embed=embed)
 
     @bot.command()

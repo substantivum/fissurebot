@@ -190,3 +190,21 @@ class BotDatabase:
             LIMIT ?
         """, (limit,))
         return cursor.fetchall()
+    
+    def update_level_and_exp(self, user_id: str, level: int, experience: int):
+        """Обновляет уровень и опыт пользователя"""
+        cursor = self.conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        cursor.execute("""
+            UPDATE users
+            SET level = ?, experience = ?
+            WHERE user_id = ?
+        """, (level, experience, user_id))
+        self.conn.commit()
+
+    def create_user(self, user_id: str):
+        """Создаёт пользователя, если его нет в БД"""
+        cursor = self.conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        cursor.execute("INSERT OR IGNORE INTO user_stats (user_id, joined_at) VALUES (?, ?)", (user_id, time.time()))
+        self.conn.commit()
