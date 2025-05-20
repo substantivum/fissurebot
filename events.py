@@ -2,6 +2,7 @@
 import discord
 from database import BotDatabase
 from utils import DAILY_COOLDOWN
+from levels import handle_message_xp
 
 def setup(bot, db):
     @bot.event
@@ -12,7 +13,7 @@ def setup(bot, db):
     async def on_message(message):
         if not message.author.bot:
             db.update_message_count(str(message.author.id))
-            db.update_experience(str(message.author.id), 5)
+            await handle_message_xp(bot, db, message)
             await bot.process_commands(message)
     
     @bot.event
