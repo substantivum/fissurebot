@@ -1,15 +1,18 @@
-# economy.py
 import discord
+from discord.ext import commands
 from discord.ui import View, Button
-from database import BotDatabase
-from utils import logger, DAILY_COOLDOWN
+import sqlite3
 import random
 import time
-from datetime import datetime 
+import re
+from datetime import datetime
+from collections import defaultdict
+
+# Константы
+DAILY_COOLDOWN = 24 * 60 * 60  # 24 часа в секундах
+EMOJI_REGEX = re.compile(r'<a?:(\w+):\d+>|[\U00010000-\U0010ffff]')
 
 def setup(bot, db):
-    
-    def setup(bot, db):
     
     @bot.event
     async def on_voice_state_update(member, before, after):
@@ -213,67 +216,6 @@ def setup(bot, db):
         embed.set_footer(text=f"Запрошено {ctx.author.display_name}", icon_url=ctx.author.avatar.url)
         
         await ctx.send(embed=embed)
-    
-    @bot.command(name="roleshop")
-    async def roleshop(ctx):
-        class RoleShopView(View):
-            def __init__(self):
-                super().__init__(timeout=None)
-                self.load_roles()
-
-            def load_roles(self):
-                cursor = db.conn.cursor()
-                cursor.execute("SELECT role_name, price FROM role_shop")
-                self.roles = cursor.fetchall()
-
-            async def interaction_check(self, interaction: discord.Interaction):
-                return not interaction.user.bot
-
-            async def create_button_callback(self, role_name: str, price: int):
-                async def button_callback(interaction: discord.Interaction):
-                    user_id = str(interaction.user.id)
-                    guild = interaction.guild
-                    role = discord.utils.get(guild.roles, name=role_name)
-                    
-                    if not role:
-                        await interaction.response.send_message(f"❌ Role `{role_name}` not found on this server.", ephemeral=True)
-                        return
-                    
-                    if role in interaction.user.roles:
-                        await interaction.response.send_message(f"❌ You already have the `{role_name}` role.", ephemeral=True)
-                        return
-                    
-                    cursor = db.conn.cursor()
-                    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-                    result = cursor.fetchone()
-                    balance = result[0] if result else 0
-                    
-                    if balance < price:
-                        await interaction.response.send_message(f"❌ Not enough coins to buy `{role_name}`.", ephemeral=True)
-                        return
-                    
-                    db.update_balance(user_id, -price)
-                    await interaction.user.add_roles(role)
-                    await interaction.response.send_message(f"✅ Bought `{role_name}` for {price} fissure coins!", ephemeral=True)
-                
-                return button_callback
-
-        embed = discord.Embed(title="🎖️ Role Shop", description="Select a role to purchase", color=0x00ff00)
-        view = RoleShopView()
-        
-        for role_name, price in view.roles:
-            embed.add_field(name=role_name, value=f"{price} fissure coins", inline=False)
-        
-        for role_name, price in view.roles:
-            button = Button(
-                label=f"Buy {role_name}", 
-                custom_id=f"buyrole_{role_name.lower()}", 
-                style=discord.ButtonStyle.primary
-            )
-            button.callback = await view.create_button_callback(role_name, price)
-            view.add_item(button)
-        
-        await ctx.send(embed=embed, view=view)
 
     @bot.command(name="balance")
     async def balance(ctx, member: discord.Member = None):
