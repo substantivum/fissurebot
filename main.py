@@ -22,6 +22,7 @@ bot = commands.Bot(
 )
 
 # Импорты модулей (после создания бота)
+import levels
 from database import BotDatabase
 from events import setup as setup_events
 from music import setup as setup_music
@@ -29,6 +30,7 @@ from economy import setup as setup_economy
 from admin import setup as setup_admin
 from levels import setup as setup_levels
 from games import setup as setup_games
+from rooms import setup as setup_rooms
 from utils import logger
 
 # Инициализация базы данных
@@ -42,8 +44,8 @@ setup_economy(bot, db)
 setup_admin(bot, db)
 setup_levels(bot, db)
 setup_games(bot, db)
-
-
+setup_rooms(bot)
+    
 if __name__ == "__main__":
     try:
         bot.run(TOKEN)

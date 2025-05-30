@@ -13,7 +13,7 @@ DAILY_COOLDOWN = 24 * 60 * 60  # 24 часа в секундах
 EMOJI_REGEX = re.compile(r'<a?:(\w+):\d+>|[\U00010000-\U0010ffff]')
 
 def setup(bot, db):
-    
+
     @bot.event
     async def on_voice_state_update(member, before, after):
         user_id = str(member.id)
@@ -27,7 +27,7 @@ def setup(bot, db):
                 time_spent = int(time.time()) - join_time
                 db.update_voice_time(user_id, time_spent)
                 db.set_voice_join_time(user_id, None)
-    
+
     @bot.event
     async def on_message(message):
         if message.author.bot:
@@ -63,34 +63,8 @@ def setup(bot, db):
                 word = ''.join(c for c in word if c.isalnum())
                 if word:  # Проверяем, что слово не пустое после обработки
                     db.track_word(user_id, word)
-            
-            # Начисляем опыт за сообщения
-            exp_gain = random.randint(5, 15)
-            try:
-                db.conn.execute("""
-                    UPDATE users SET experience = experience + ? WHERE user_id = ?
-                """, (exp_gain, user_id))
-                db.conn.commit()
-            except sqlite3.Error as e:
-                print(f"[ERROR] Ошибка при начислении опыта: {e}")
-            
-            # Проверка повышения уровня
-            try:
-                user = db.get_user(user_id)
-                exp_needed = user['level'] * 100
-                if user['experience'] >= exp_needed:
-                    db.conn.execute("""
-                        UPDATE users 
-                        SET level = level + 1, experience = experience - ?
-                        WHERE user_id = ?
-                    """, (exp_needed, user_id))
-                    db.conn.commit()
-                    await message.channel.send(f"🎉 {message.author.mention} достиг уровня {user['level'] + 1}!")
-            except sqlite3.Error as e:
-                print(f"[ERROR] Ошибка при повышении уровня: {e}")
-        
-        await bot.process_commands(message)
-    
+           
+
     @bot.command(name="fissdaily")
     async def daily(ctx):
         user_id = str(ctx.author.id)
@@ -112,15 +86,24 @@ def setup(bot, db):
             await ctx.send(f"⏳ Вы сможете получить награду через {hours}ч {minutes}м {seconds}с")
             return
         
-        amount = random.randint(10, 50)
+        # Random coins between 35 and 50
+        amount = random.randint(35, 50)
+
+        # Level-based bonus (5 * level)
+        level = user_data['level']  # Get the user's level
+        level_bonus = 5 * level
+
+        # Calculate total reward
+        total = amount + level_bonus
+
         streak = stats["daily_streak"] or 0
         if time.time() - last_daily < DAILY_COOLDOWN * 2:
             streak += 1
         else:
             streak = 1
         
-        bonus = min(streak * 5, 100)
-        total = amount + bonus
+        bonus = min(streak * 5, 150)  # Max streak bonus of 150
+        total += bonus
 
         db.update_balance(user_id, total)
         try:
@@ -134,89 +117,10 @@ def setup(bot, db):
             print(f"[ERROR] Ошибка при обновлении ежедневной статистики: {e}")
         
         await ctx.send(
-            f"🎉 Вы получили {amount} монет (серия: {streak} дней) + {bonus} бонус = **{total} монет**!\n"
+            f"🎉 Вы получили {amount} монет (серия: {streak} дней) + {bonus} бонус + {level_bonus} за уровень = **{total} монет**!\n"
             f"Ваш баланс: {user_data['balance'] + total}"
         )
-    
-    @bot.command(name="help")
-    async def bothelp_command(ctx):
-        embed = discord.Embed(
-            title="📚 Список команд бота",
-            description="Все доступные команды разделены по категориям",
-            color=0x00ffcc
-        )
-
-        # Music Commands
-        embed.add_field(
-            name="🎵 Музыкальные команды",
-            value="""
-            `!play <url>` - Проиграть песню с YouTube
-            `!queue` - Показать очередь
-            `!skip` - Пропустить песню
-            `!clearqueue` - Очистить очередь
-            `!shufflequeue` - Перемешать очередь
-            `!stop` - Остановить музыку
-            `!join` - Подключиться к голосу
-            `!leave` - Покинуть голосовой канал
-            `!volume <0.0-2.0>` - Изменить громкость
-            `!nowplaying` - Текущая песня
-            """,
-            inline=False
-        )
-
-        # Economy Commands
-        embed.add_field(
-            name="💰 Экономика",
-            value="""
-            `!balance` - Проверить баланс
-            `!fissdaily` - Получить ежедневную награду
-            `!pay @user amount` - Передать монеты
-            `!leaderboard` - Таблица лидеров
-            """,
-            inline=False
-        )
-
-        # Statistics Commands
-        embed.add_field(
-            name="📊 Статистика",
-            value="""
-            `!level` - Проверить уровень и опыт
-            `!activity` - Статистика активности
-            `!topactivity` - Топ по активности
-            """,
-            inline=False
-        )
-
-        # Role Shop Commands
-        embed.add_field(
-            name="🎖️ Магазин ролей",
-            value="`!roleshop` - Посмотреть доступные роли",
-            inline=False
-        )
-
-        # Admin Commands
-        if ctx.author.guild_permissions.administrator:
-            embed.add_field(
-                name="🔒 Админ-команды",
-                value="""
-                `!adminpanel` - Открыть админ-панель
-                `!addrole <name> <price>` - Добавить роль
-                `!removerole <name>` - Удалить роль
-                `!setprice <name> <price>` - Изменить цену
-                `!givecoins @user <amount>` - Выдать монеты
-                `!resetuser @user` - Сбросить данные
-                `!broadcast <message>` - Объявление
-                `!cleardb` - Очистить базу
-                `!shutdown` - Выключить бота
-                `!clear_downloads` - Очистить загрузки
-                """,
-                inline=False
-            )
         
-        embed.set_footer(text=f"Запрошено {ctx.author.display_name}", icon_url=ctx.author.avatar.url)
-        
-        await ctx.send(embed=embed)
-
     @bot.command(name="balance")
     async def balance(ctx, member: discord.Member = None):
         target = member or ctx.author
@@ -227,7 +131,9 @@ def setup(bot, db):
             db.create_user(user_id)
             user = db.get_user(user_id)
         
-        await ctx.send(f"💰 {target.display_name} имеет {user['balance']} монет")
+        extra = credit_time_based_coins(user_id, stats)
+        await ctx.send(f"💰 {target.display_name} имеет {user['balance'] + extra} монет (включая +{extra} за онлайн)")
+
     
     @bot.command(name="leaderboard")
     async def leaderboard(ctx, top_n: int = 10):
@@ -247,22 +153,8 @@ def setup(bot, db):
             """, (top_n,))
             money_top = cursor.fetchall()
 
-            # Get level/exp leaderboard
-            cursor.execute("""
-                SELECT user_id, level, experience 
-                FROM users 
-                ORDER BY level DESC, experience DESC 
-                LIMIT ?
-            """, (top_n,))
-            level_top = cursor.fetchall()
-
-            if not money_top and not level_top:
-                await ctx.send("❌ Нет данных для таблицы лидеров.")
-                return
-
             embed = discord.Embed(title="🏆 Таблица лидеров", color=0xFFD700)
-            
-            # Add money leaderboard if data exists
+
             if money_top:
                 money_desc = []
                 for idx, (user_id, balance) in enumerate(money_top, 1):
@@ -278,23 +170,7 @@ def setup(bot, db):
                     inline=False
                 )
 
-            # Add level leaderboard if data exists
-            if level_top:
-                level_desc = []
-                for idx, (user_id, level, exp) in enumerate(level_top, 1):
-                    try:
-                        user = await bot.fetch_user(int(user_id))
-                        level_desc.append(f"{idx}. {user.display_name} — Ур. {level} (Опыт: {exp})")
-                    except Exception:
-                        level_desc.append(f"{idx}. [Неизвестный] — Ур. {level} (Опыт: {exp})")
-                
-                embed.add_field(
-                    name="🏅 Самые опытные игроки",
-                    value="\n".join(level_desc),
-                    inline=False
-                )
-
-            embed.set_footer(text=f"Показано топ-{top_n} игроков в каждой категории")
+            embed.set_footer(text=f"Показано топ-{top_n} игроков")
             await ctx.send(embed=embed)
 
         except sqlite3.Error as e:
@@ -303,69 +179,7 @@ def setup(bot, db):
         except Exception as e:
             print(f"[ОШИБКА] Непредвиденная ошибка: {e}")
             await ctx.send("❌ Произошла непредвиденная ошибка.")
-    
-    @bot.command(name="mystats")
-    async def mystats(ctx, member: discord.Member = None):
-        target = member or ctx.author
-        user_id = str(target.id)
-        
-        # Initialize user if not exists
-        if not db.get_user(user_id):
-            db.create_user(user_id)
-        
-        # Get all statistics
-        top_emojis = db.get_top_emojis(user_id)
-        top_words = db.get_top_words(user_id)
-        voice_seconds = db.get_voice_time(user_id)
-        stats = db.get_user_stats(user_id)
-        user = db.get_user(user_id)
-        level_info = db.get_level(user_id)  # Get level info
-        
-        # Format voice time
-        hours, remainder = divmod(voice_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        voice_time_str = f"{int(hours)}ч {int(minutes)}м {int(seconds)}с"
-        
-        # Create embed
-        embed = discord.Embed(
-            title=f"📊 Статистика {target.display_name}",
-            color=0x00ffcc
-        )
-        
-        # Basic info
-        embed.add_field(name="🏆 Уровень", value=str(level_info["level"]), inline=True)
-        embed.add_field(
-            name="✨ Опыт", 
-            value=f"{level_info['experience']}/{level_info['next_level_exp']}", 
-            inline=True
-        )
-        embed.add_field(name="💰 Баланс", value=f"{user['balance']} монет", inline=True)
-        
-        # Activity
-        embed.add_field(name="💬 Сообщений", value=str(stats["messages"]), inline=True)
-        embed.add_field(name="🎤 Время в голосе", value=voice_time_str, inline=True)
-        
-        # Top emojis
-        if top_emojis:
-            emoji_text = "\n".join([f"{emoji}: {count} раз" for emoji, count in top_emojis])
-            embed.add_field(name="❤️ Топ эмодзи", value=emoji_text, inline=False)
-        else:
-            embed.add_field(name="❤️ Топ эмодзи", value="Нет данных", inline=False)
-        
-        # Top words (filter words used more than 3 times)
-        if top_words:
-            filtered_words = [(word, count) for word, count in top_words if count > 3]
-            if filtered_words:
-                words_text = "\n".join([f"'{word}': {count} раз" for word, count in filtered_words])
-                embed.add_field(name="📝 Топ слов", value=words_text, inline=False)
-            else:
-                embed.add_field(name="📝 Топ слов", value="Нет слов, которые были сказаны более 3 раз", inline=False)
-        else:
-            embed.add_field(name="📝 Топ слов", value="Нет данных", inline=False)
-        
-        embed.set_thumbnail(url=target.avatar.url)
-        await ctx.send(embed=embed)
-
+            
     @bot.command(name="roleshop")
     async def roleshop(ctx):
         class RoleShopView(View):
@@ -381,39 +195,39 @@ def setup(bot, db):
                 except sqlite3.Error as e:
                     print(f"[ERROR] Ошибка при загрузке ролей: {e}")
                     self.roles = []
-            
+
             async def create_button_callback(self, role_name: str, price: int):
                 async def button_callback(interaction: discord.Interaction):
                     user_id = str(interaction.user.id)
                     guild = interaction.guild
                     role = discord.utils.get(guild.roles, name=role_name)
-                    
+
                     if not role:
                         await interaction.response.send_message(
                             f"❌ Роль `{role_name}` не найдена на этом сервере.",
                             ephemeral=True
                         )
                         return
-                    
+
                     if role in interaction.user.roles:
                         await interaction.response.send_message(
                             f"❌ У вас уже есть роль `{role_name}`.",
                             ephemeral=True
                         )
                         return
-                    
+
                     user = db.get_user(user_id)
                     if not user:
                         db.create_user(user_id)
                         user = db.get_user(user_id)
-                    
+
                     if user['balance'] < price:
                         await interaction.response.send_message(
                             f"❌ Недостаточно монет для покупки `{role_name}`.",
                             ephemeral=True
                         )
                         return
-                    
+
                     db.update_balance(user_id, -price)
                     try:
                         await interaction.user.add_roles(role)
@@ -433,31 +247,65 @@ def setup(bot, db):
                             ephemeral=True
                         )
                 return button_callback
-        
+
         embed = discord.Embed(title="🎖️ Магазин ролей", color=0x00ff00)
         view = RoleShopView()
-        
+
         try:
             cursor = db.conn.cursor()
             cursor.execute("SELECT role_name, price FROM role_shop")
             roles = cursor.fetchall()
-            
+
             if not roles:
-                embed.description = "В магазине пока нет ролей"
+                embed.description = "В магазине пока нет ролей."
                 await ctx.send(embed=embed)
                 return
-            
+
+            description_lines = []
+
             for role_name, price in roles:
-                embed.add_field(name=role_name, value=f"{price} монет", inline=False)
+                role = discord.utils.get(ctx.guild.roles, name=role_name)
+                if role:
+                    description_lines.append(f"{role.mention} — {price} монет")
+                else:
+                    description_lines.append(f"`{role_name}` — {price} монет (роль не найдена)")
+
                 button = Button(
-                    label=f"Купить {role_name}", 
+                    label=f"Купить {role_name}",
                     style=discord.ButtonStyle.primary,
                     custom_id=f"buy_{role_name}"
                 )
                 button.callback = await view.create_button_callback(role_name, price)
                 view.add_item(button)
-            
+
+            embed.description = "\n".join(description_lines)
             await ctx.send(embed=embed, view=view)
         except sqlite3.Error as e:
             print(f"[ERROR] Ошибка при отображении магазина ролей: {e}")
             await ctx.send("❌ Не удалось загрузить магазин ролей.")
+            
+    # Автоматическое начисление коинов за время на сервере
+    def credit_time_based_coins(user_id, stats):
+        join_ts = stats.get("join_timestamp")
+        if not join_ts:
+            return 0
+
+        credited_hours = stats.get("credited_hours", 0)
+        total_hours = int((time.time() - join_ts) / 3600)
+        delta_hours = total_hours - credited_hours
+
+        if delta_hours <= 0:
+            return 0
+
+        reward = delta_hours * 6
+        try:
+            db.update_balance(user_id, reward)
+            db.conn.execute("""
+                UPDATE user_stats SET credited_hours = ? WHERE user_id = ?
+            """, (total_hours, user_id))
+            db.conn.commit()
+        except sqlite3.Error as e:
+            print(f"[ERROR] Ошибка при начислении пассивных коинов: {e}")
+            return 0
+
+        return reward

@@ -1,9 +1,12 @@
 import discord
 from discord.ext import commands
 import random
+import time
 
 # Храним активные дуэли в памяти
 pending_duels = {}
+
+COOLDOWN = 3600  # 1 час в секундах
 
 def setup(bot, db):
     @bot.command(name="duel")
@@ -17,6 +20,14 @@ def setup(bot, db):
 
         if bet <= 0:
             await ctx.send("❌ Ставка должна быть положительным числом.")
+            return
+
+        # Проверяем кулдаун
+        last_used = db.get_last_used(challenger_id, "duel")
+        now = time.time()
+        if now - last_used < COOLDOWN:
+            remaining = round((COOLDOWN - (now - last_used)) / 60, 1)
+            await ctx.send(f"⏳ Подожди ещё **{remaining} мин**, прежде чем снова использовать эту команду.")
             return
 
         challenger_data = db.get_user(challenger_id)
@@ -41,6 +52,9 @@ def setup(bot, db):
 
         await ctx.send(f"⚔️ {ctx.author.mention} вызвал {opponent.mention} на дуэль на **{bet}** монет!\n"
                        f"{opponent.mention}, напиши `!accept` в течение 60 секунд, чтобы принять.")
+
+        # Обновляем время последнего использования команды
+        db.update_last_used(challenger_id, "duel")
 
     @bot.command(name="accept")
     async def accept(ctx):
@@ -88,13 +102,24 @@ def setup(bot, db):
             await ctx.send("Ставка должна быть положительной.")
             return
         if user["balance"] < amount:
-            await ctx.send("У тебя недостаточно баллов.")
+            await ctx.send("У тебя недостаточно монет.")
+            return
+
+        # Проверяем кулдаун
+        last_used = db.get_last_used(user_id, "coinflip")
+        now = time.time()
+        if now - last_used < COOLDOWN:
+            remaining = round((COOLDOWN - (now - last_used)) / 60, 1)
+            await ctx.send(f"⏳ Подожди ещё **{remaining} мин**, прежде чем снова использовать эту команду.")
             return
 
         result = random.choice(["win", "lose"])
         if result == "win":
             db.update_balance(user_id, amount)
-            await ctx.send(f"🎉 Удача на твоей стороне! Ты выиграл {amount} баллов.")
+            await ctx.send(f"🎉 Удача на твоей стороне! Ты выиграл {amount} монет.")
         else:
             db.update_balance(user_id, -amount)
-            await ctx.send(f"💀 Ты проиграл {amount} баллов. Удачи в следующий раз!")
+            await ctx.send(f"💀 Ты проиграл {amount} монет. Удачи в следующий раз!")
+
+        # Обновляем время последнего использования команды
+        db.update_last_used(user_id, "coinflip")

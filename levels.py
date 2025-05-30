@@ -1,9 +1,29 @@
-# leveling.py
 import discord
 from discord.ext import commands
+import utils
 import time
 
+LEVEL_UP_EXPERIENCE = 100
+
 def setup(bot, db):
+    @bot.event
+    async def on_message(message):
+        # Ignore messages from the bot itself
+        if message.author.bot:
+            return
+
+        # Skip experience gain if the message starts with the command prefix
+        if message.content.startswith(bot.command_prefix):
+            # Process the command first so the bot can respond
+            await bot.process_commands(message)
+            return
+
+        # Handle experience gain for regular messages
+        await handle_message_xp(bot, db, message)
+
+        # Continue processing other commands
+        await bot.process_commands(message)
+
     @bot.command(name="level")
     async def level(ctx, member: discord.Member = None):
         target = member or ctx.author
@@ -79,20 +99,23 @@ async def handle_message_xp(bot, db, message, xp_gain=5):
         user_data = db.get_user(user_id)
 
     level = user_data["level"]
-    exp = user_data["experience"] + xp_gain
+    experience = user_data["experience"] + xp_gain
 
     leveled_up = False
-    while exp >= get_required_exp(level):
-        exp -= get_required_exp(level)
-        level += 1
+    # Check if the user has gained enough experience to level up
+    while experience >= LEVEL_UP_EXPERIENCE * (2 ** (level - 1)):  # Using LEVEL_UP_EXPERIENCE multiplier
+        experience -= LEVEL_UP_EXPERIENCE * (2 ** (level - 1))  # Subtract experience for level-up
+        level += 1  # Level up
         leveled_up = True
 
-    db.update_level_and_exp(user_id, level, exp)
+    # Update the user's experience and level in the database
+    db.update_level_and_exp(user_id, level, experience)
 
+    # Notify user about the level up if leveled up
     if leveled_up:
         try:
             await message.channel.send(
                 f"🎉 {message.author.mention} повысил(а) уровень до **{level}**! Поздравляем!"
             )
         except discord.Forbidden:
-            pass  # Нет прав на отправку сообщений в канал
+            pass  # No permission to send message in the channel

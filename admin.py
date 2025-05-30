@@ -6,7 +6,10 @@ from discord.ext import commands  # Обязательно добавьте эт
 import os  # Needed for clear_downloads
 import shutil
 import re
+import asyncio
+import levels
 
+LEVEL_UP_EXPERIENCE=100
 def is_admin():
     """Проверка прав администратора"""
     async def predicate(ctx):
@@ -22,65 +25,84 @@ def setup(bot, db):
     
     @bot.command(name="bothelp")
     async def help_command(ctx):
-        """Отображает список доступных команд с описаниями"""
+        """Интерактивная справка по командам бота (без админ-раздела)"""
+        
+        # Структура категорий и команд
+        categories = {
+            "🎵 Музыка": [
+                {"name": "play", "description": "Проиграть музыку из YouTube", "usage": "!play <ссылка или название>"},
+                {"name": "queue", "description": "Показать текущую очередь треков", "usage": "!queue"},
+                {"name": "skip", "description": "Пропустить текущий трек", "usage": "!skip"},
+                {"name": "stop", "description": "Остановить воспроизведение и отключиться", "usage": "!stop"},
+                {"name": "clearqueue", "description": "Очистить очередь", "usage": "!clearqueue"},
+                {"name": "join", "description": "Подключить бота к голосовому каналу", "usage": "!join"},
+                {"name": "leave", "description": "Отключить бота от канала", "usage": "!leave"},
+                {"name": "volume", "description": "Установить громкость (0.0 - 1.0)", "usage": "!volume 0.5"},
+                {"name": "nowplaying", "description": "Показать, что сейчас играет", "usage": "!nowplaying"}
+            ],
+            "💰 Экономика": [
+                {"name": "balance", "description": "Проверить свой или чужой баланс монет", "usage": "!balance [пользователь]"},
+                {"name": "fissdaily", "description": "Получить ежедневную награду", "usage": "!fissdaily"}
+
+            ],
+            "📊 Уровни и статистика": [
+                {"name": "level", "description": "Показать уровень и опыт", "usage": "!level"},
+                {"name": "activity", "description": "Показать активность пользователя", "usage": "!activity"},
+                {"name": "leaderboard", "description": "Посмотреть таблицу лидеров", "usage": "!leaderboard"},
+                {"name": "mystats", "description": "Показать личную статистику пользователя", "usage": "!mystats"}
+            ],
+            "🎮 Развлечения": [
+                {"name": "roleshop", "description": "Посмотреть и купить роли в магазине", "usage": "!roleshop"},
+                {"name": "duel", "description": "Вызвать пользователя на дуэль с монетами", "usage": "!duel @пользователь 50"},
+                {"name": "accept", "description": "Принять вызов на дуэль", "usage": "!accept"},
+                {"name": "coinflip", "description": "Сыграть в орёл/решка за удвоение ставки", "usage": "!coinflip 100"}
+            ]
+        }
+
+        class HelpSelect(discord.ui.Select):
+            def __init__(self):
+                options = [
+                    discord.SelectOption(label=category, description=f"Команды из раздела {category}", emoji="🔘")
+                    for category in categories.keys()
+                ]
+                super().__init__(placeholder="Выбери категорию...", options=options)
+
+            async def callback(self, interaction: discord.Interaction):
+                selected_category = self.values[0]
+                commands_list = categories[selected_category]
+
+                embed = discord.Embed(
+                    title=f"📘 Команды — {selected_category}",
+                    color=0x1E90FF
+                )
+
+                for cmd in commands_list:
+                    value_text = f"**Описание:** {cmd['description']}\n**Использование:** `{cmd['usage']}`"
+                    embed.add_field(
+                        name=f"🔸 {cmd['name']}",
+                        value=value_text,
+                        inline=False
+                    )
+
+                await interaction.response.edit_message(embed=embed)
+
+        class HelpView(discord.ui.View):
+            def __init__(self):
+                super().__init__()
+                self.add_item(HelpSelect())
+
+        # Отправляем начальное сообщение с меню выбора
         embed = discord.Embed(
-            title="📘 Справка по командам Fissure Bot",
-            description="Доступные функции и их использование",
+            title="🤖 Система помощи Fissure Bot",
+            description="Выбери категорию ниже, чтобы посмотреть доступные команды.",
             color=0x1E90FF
         )
+        message = await ctx.send(embed=embed, view=HelpView())
         
-        # Добавляем команды вручную для точного контроля порядка и описания
-        commands_info = [
-            {
-                "name": "fissdaily",
-                "description": "Получить ежедневную награду в монетах",
-                "usage": "!fissdaily"
-            },
-            {
-                "name": "balance",
-                "description": "Проверить текущий баланс монет",
-                "usage": "!balance [пользователь]"
-            },
-            {
-                "name": "leaderboard",
-                "description": "Посмотреть таблицу лидеров по балансу",
-                "usage": "!leaderboard"
-            },
-            {
-                "name": "mystats",
-                "description": "Показать личную статистику пользователя",
-                "usage": "!mystats [пользователь]"
-            },
-            {
-                "name": "roleshop",
-                "description": "Посмотреть и купить роли в магазине",
-                "usage": "!roleshop"
-            }
-        ]
-
-        for cmd in commands_info:
-            embed.add_field(
-                name=f"🔸 {cmd['name']}",
-                value=f"**Описание:** {cmd['description']}\n**Использование:** `{cmd['usage']}`",
-                inline=False
-            )
-
-        # Добавляем дополнительные сведения
-        embed.add_field(
-            name="🎯 Уровни и опыт",
-            value="За каждое сообщение вы получаете опыт, который повышает ваш уровень",
-            inline=False
-        )
-        embed.add_field(
-            name="💬 Статистика",
-            value="Бот отслеживает ваши сообщения, любимые эмодзи и часто используемые слова",
-            inline=False
-        )
-
-        await ctx.send(embed=embed)
+        await asyncio.sleep(60)
+        await message.delete()
 
 
-    
     @bot.command(name="adminpanel")
     @is_admin()
     async def admin_panel(ctx):
@@ -315,13 +337,6 @@ def setup(bot, db):
         db.conn.commit()
         await ctx.send(f"✅ Данные пользователя {member.display_name} сброшены")
 
-
-    @bot.command(name="shutdown")
-    @is_admin()
-    async def shutdown(ctx):
-        await ctx.send("🛑 Выключаю бота...")
-        await bot.close()
-
     @bot.command(name="clear_downloads")
     @is_admin()
     async def clear_downloads(ctx):
@@ -333,3 +348,58 @@ def setup(bot, db):
             await ctx.send("🗑️ Папка загрузок очищена!")
         except Exception as e:
             await ctx.send(f"❌ Ошибка при очистке: {str(e)}")
+            
+    @bot.command(name="giveexp")
+    @is_admin()
+    async def give_xp(ctx, member: str, xp_amount: int):
+        """Команда для выдачи опыта пользователю (только для администраторов)."""
+        
+        # Ensure the XP amount is a valid positive number
+        if xp_amount <= 0:
+            await ctx.send("❌ Опыт должен быть положительным числом.")
+            return
+        
+        # Try to convert the member argument into a valid discord member
+        if member.startswith('<@') and member.endswith('>'):
+            member_id = member[3:-1]  # Remove the <@ and >
+        else:
+            member_id = member
+        
+        # Fetch the member object using the ID
+        try:
+            member_obj = await ctx.guild.fetch_member(int(member_id))
+        except (discord.NotFound, ValueError):
+            await ctx.send("❌ Пользователь не найден. Убедитесь, что введен правильный ID или упоминание.")
+            return
+        
+        user_id = str(member_obj.id)
+        user_data = db.get_user(user_id)  # Fetch current user data
+        
+        if not user_data:
+            db.create_user(user_id)  # If user doesn't exist, create a new entry
+            user_data = db.get_user(user_id)
+        
+        current_exp = user_data["experience"]
+        current_level = user_data["level"]
+        
+        # Add the xp to the user's current experience
+        new_exp = current_exp + xp_amount
+        leveled_up = False
+        
+        # Level-up logic: Check if the user exceeds the required XP for the next level
+        while new_exp >= levels.get_required_exp(current_level):  # Use the exponential XP formula
+            new_exp -= levels.get_required_exp(current_level)  # Subtract the experience for level-up
+            current_level += 1  # Increase the level
+            leveled_up = True
+
+        # Update the database with the new experience and level
+        db.update_level_and_exp(user_id, current_level, new_exp)
+        
+        # Send a message confirming the experience given
+        await ctx.send(f"✅ Вы выдали {xp_amount} опыта пользователю {member_obj.display_name}.")
+        
+        # If the user leveled up, notify them
+        if leveled_up:
+            await ctx.send(f"🎉 {member_obj.display_name} повысил(а) уровень до **{current_level}**!")
+        else:
+            await ctx.send(f"📊 Текущий опыт пользователя {member_obj.display_name}: {new_exp} (Уровень {current_level})")

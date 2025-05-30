@@ -32,6 +32,8 @@ class BotDatabase:
                 joined_at REAL DEFAULT 0,
                 daily_streak INTEGER DEFAULT 0,
                 last_daily REAL DEFAULT 0,
+                join_timestamp INTEGER,
+                credited_hours INTEGER DEFAULT 0,
                 FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
         """)
@@ -76,11 +78,15 @@ class BotDatabase:
             )
         """)
 
-        # Initial roles in the shop
-        cursor.executemany(
-            "INSERT OR IGNORE INTO role_shop (role_name, price) VALUES (?, ?)",
-            [("VIP", 500), ("Legend", 1000), ("Champion", 2000)]
-        )
+                # Command cooldown table
+        cursor.execute(""" 
+            CREATE TABLE IF NOT EXISTS command_cooldowns (
+                user_id TEXT PRIMARY KEY,
+                last_coinflip REAL DEFAULT 0,
+                last_duel REAL DEFAULT 0,
+                FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)    
 
         self.conn.commit()
         logger.info("Структура БД инициализирована")
@@ -117,7 +123,10 @@ class BotDatabase:
                 INSERT OR IGNORE INTO user_stats (user_id, messages, last_daily, daily_streak, joined_at)
                 VALUES (?, 0, 0, 0, ?)
             """, (user_id, int(time.time())))
-
+            self.conn.execute(""" 
+    INSERT OR IGNORE INTO command_cooldowns (user_id)
+    VALUES (?)
+    """, (user_id,))
             self.conn.commit()
         except sqlite3.Error as e:
             logger.error(f"[ERROR] Ошибка при создании пользователя: {e}")
@@ -319,3 +328,46 @@ class BotDatabase:
         except sqlite3.Error as e:
             logger.error(f"[ERROR] Ошибка при получении голосового времени: {e}")
             return 0
+        
+    def update_last_used(self, user_id: str, command_name: str):
+        """Обновляет время последнего использования команды"""
+        try:
+            cursor = self.conn.cursor()
+            if command_name == "coinflip":
+                cursor.execute("""
+                    INSERT INTO command_cooldowns (user_id, last_coinflip)
+                    VALUES (?, strftime('%s','now'))
+                    ON CONFLICT(user_id) DO UPDATE SET last_coinflip = strftime('%s','now')
+                """, (user_id,))
+            elif command_name == "duel":
+                cursor.execute("""
+                    INSERT INTO command_cooldowns (user_id, last_duel)
+                    VALUES (?, strftime('%s','now'))
+                    ON CONFLICT(user_id) DO UPDATE SET last_duel = strftime('%s','now')
+                """, (user_id,))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"[ERROR] Ошибка при обновлении времени команд: {e}")
+
+    def get_last_used(self, user_id: str, command_name: str):
+        """Получает время последнего использования команды"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM command_cooldowns WHERE user_id=?", (user_id,))
+            result = cursor.fetchone()
+            if not result:
+                return 0
+            if command_name == "coinflip":
+                return result[1]  # last_coinflip
+            elif command_name == "duel":
+                return result[2]  # last_duel
+        except sqlite3.Error as e:
+            logger.error(f"[ERROR] Ошибка при получении времени команд: {e}")
+            return 0
+        
+    def set_join_timestamp(self, user_id, timestamp):
+        try:
+            self.conn.execute("UPDATE user_stats SET join_timestamp = ? WHERE user_id = ?", (timestamp, user_id))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"[ERROR] Ошибка при установке join_timestamp: {e}")
