@@ -7,19 +7,24 @@ import time
 import re
 from datetime import datetime
 from collections import defaultdict
+from typing import Optional
 
 # Константы
 DAILY_COOLDOWN = 24 * 60 * 60  # 24 часа в секундах
 EMOJI_REGEX = re.compile(r'<a?:(\w+):\d+>|[\U00010000-\U0010ffff]')
+PASSIVE_INCOME_RATE = 6  # монет в час за онлайн
 
 def setup(bot, db):
-
     @bot.event
     async def on_voice_state_update(member, before, after):
+        """Обработка событий голосовых каналов"""
         user_id = str(member.id)
+        
         # Пользователь зашел в голосовой канал
         if before.channel is None and after.channel is not None:
             db.set_voice_join_time(user_id, int(time.time()))
+            db.set_join_timestamp(user_id, int(time.time()))
+        
         # Пользователь вышел из голосового канала
         elif before.channel is not None and after.channel is None:
             join_time = db.get_voice_join_time(user_id)
@@ -30,6 +35,7 @@ def setup(bot, db):
 
     @bot.event
     async def on_message(message):
+        """Обработка сообщений для экономики"""
         if message.author.bot:
             return
         
@@ -40,17 +46,9 @@ def setup(bot, db):
             db.create_user(user_id)
         
         # Обновляем статистику сообщений
-        stats = db.get_user_stats(user_id)
-        if stats:
-            try:
-                db.conn.execute("""
-                    UPDATE user_stats SET messages = messages + 1 WHERE user_id = ?
-                """, (user_id,))
-                db.conn.commit()
-            except sqlite3.Error as e:
-                print(f"[ERROR] Ошибка при обновлении статистики сообщений: {e}")
+        db.update_message_count(user_id)
         
-        # Отслеживание всех типов эмодзи (включая анимированные)
+        # Отслеживание эмодзи
         for match in EMOJI_REGEX.finditer(message.content):
             emoji_str = match.group()
             db.track_emoji(user_id, emoji_str)
@@ -59,70 +57,89 @@ def setup(bot, db):
         if not message.content.startswith(bot.command_prefix):
             words = message.content.lower().split()
             for word in words:
-                # Удаляем знаки препинания
                 word = ''.join(c for c in word if c.isalnum())
-                if word:  # Проверяем, что слово не пустое после обработки
+                if len(word) >= 4:  # Игнорируем короткие слова
                     db.track_word(user_id, word)
-           
+
+    def calculate_passive_income(user_id: str) -> int:
+        """Рассчитывает пассивный доход пользователя"""
+        stats = db.get_user_stats(user_id)
+        if not stats or not stats.get('join_timestamp'):
+            return 0
+            
+        credited_hours = stats.get('credited_hours', 0)
+        total_hours = int((time.time() - stats['join_timestamp']) / 3600)
+        delta_hours = total_hours - credited_hours
+        
+        if delta_hours <= 0:
+            return 0
+            
+        reward = delta_hours * PASSIVE_INCOME_RATE
+        try:
+            db.update_balance(user_id, reward)
+            db.conn.execute(
+                "UPDATE user_stats SET credited_hours = ? WHERE user_id = ?",
+                (total_hours, user_id)
+            )
+            db.conn.commit()
+        except sqlite3.Error as e:
+            print(f"[ERROR] Ошибка начисления пассивного дохода: {e}")
+            return 0
+            
+        return reward
 
     @bot.command(name="fissdaily")
     async def daily(ctx):
+        """Ежедневная награда"""
         user_id = str(ctx.author.id)
         user_data = db.get_user(user_id)
         stats = db.get_user_stats(user_id)
-        
-        if not user_data:
+
+        if not user_data or not stats:
             db.create_user(user_id)
             user_data = db.get_user(user_id)
             stats = db.get_user_stats(user_id)
 
-        # If last_daily is None, this is likely the first time
-        last_daily = stats.get("last_daily", 0) or 0
+        now = int(time.time())
+        last_daily = stats.get('last_daily', 0)
+        elapsed = now - last_daily
 
-        if time.time() - last_daily < DAILY_COOLDOWN:
-            remaining = int(DAILY_COOLDOWN - (time.time() - last_daily))
-            hours, remainder = divmod(remaining, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            await ctx.send(f"⏳ Вы сможете получить награду через {hours}ч {minutes}м {seconds}с")
+        # Проверка кулдауна
+        if elapsed < DAILY_COOLDOWN:
+            remaining = DAILY_COOLDOWN - elapsed
+            hours, rem = divmod(remaining, 3600)
+            minutes, _ = divmod(rem, 60)
+            await ctx.send(f"⏳ Вы сможете получить награду через {hours}ч {minutes}м")
             return
-        
-        # Random coins between 35 and 50
-        amount = random.randint(35, 50)
 
-        # Level-based bonus (5 * level)
-        level = user_data['level']  # Get the user's level
-        level_bonus = 5 * level
-
-        # Calculate total reward
-        total = amount + level_bonus
-
-        streak = stats["daily_streak"] or 0
-        if time.time() - last_daily < DAILY_COOLDOWN * 2:
-            streak += 1
+        # Обновляем стрик
+        streak = stats.get('daily_streak', 0)
+        if elapsed < 2 * DAILY_COOLDOWN:
+            streak = (streak % 7) + 1
         else:
             streak = 1
-        
-        bonus = min(streak * 5, 150)  # Max streak bonus of 150
-        total += bonus
 
-        db.update_balance(user_id, total)
-        try:
-            db.conn.execute("""
-                UPDATE user_stats
-                SET last_daily = ?, daily_streak = ?
-                WHERE user_id = ?
-            """, (int(time.time()), streak, user_id))
-            db.conn.commit()
-        except sqlite3.Error as e:
-            print(f"[ERROR] Ошибка при обновлении ежедневной статистики: {e}")
-        
-        await ctx.send(
-            f"🎉 Вы получили {amount} монет (серия: {streak} дней) + {bonus} бонус + {level_bonus} за уровень = **{total} монет**!\n"
-            f"Ваш баланс: {user_data['balance'] + total}"
+        # Награды за стрик
+        base_rewards = [45, 50, 55, 60, 65, 70, 75]
+        base_reward = base_rewards[min(streak - 1, 6)]
+        total_reward = base_reward + user_data['level']
+
+        # Обновляем данные
+        db.update_balance(user_id, total_reward)
+        db.conn.execute(
+            "UPDATE user_stats SET last_daily = ?, daily_streak = ? WHERE user_id = ?",
+            (now, streak, user_id)
         )
-        
+        db.conn.commit()
+
+        await ctx.send(
+            f"🎁 День {streak}/7: Вы получили {base_reward} монет + {user_data['level']} за уровень = **{total_reward} монет**\n"
+            f"Ваш новый баланс: {user_data['balance'] + total_reward}"
+        )
+
     @bot.command(name="balance")
-    async def balance(ctx, member: discord.Member = None):
+    async def balance(ctx, member: Optional[discord.Member] = None):
+        """Показывает баланс пользователя"""
         target = member or ctx.author
         user_id = str(target.id)
         user = db.get_user(user_id)
@@ -131,181 +148,120 @@ def setup(bot, db):
             db.create_user(user_id)
             user = db.get_user(user_id)
         
-        extra = credit_time_based_coins(user_id, stats)
-        await ctx.send(f"💰 {target.display_name} имеет {user['balance'] + extra} монет (включая +{extra} за онлайн)")
+        passive_income = calculate_passive_income(user_id)
+        total_balance = user['balance'] + passive_income
+        
+        await ctx.send(f"💰 {target.display_name} имеет {total_balance} монет.")
 
-    
     @bot.command(name="leaderboard")
     async def leaderboard(ctx, top_n: int = 10):
-        # Validate top_n input
-        if top_n < 1 or top_n > 25:
-            await ctx.send("❌ Пожалуйста, укажите число от 1 до 25")
-            return
+        """Таблица лидеров по балансу"""
+        if not 1 <= top_n <= 25:
+            return await ctx.send("❌ Пожалуйста, укажите число от 1 до 25")
 
         try:
-            # Get money leaderboard
             cursor = db.conn.cursor()
             cursor.execute("""
-                SELECT user_id, balance 
-                FROM users 
-                ORDER BY balance DESC 
-                LIMIT ?
+                SELECT user_id, balance FROM users 
+                ORDER BY balance DESC LIMIT ?
             """, (top_n,))
-            money_top = cursor.fetchall()
-
-            embed = discord.Embed(title="🏆 Таблица лидеров", color=0xFFD700)
-
-            if money_top:
-                money_desc = []
-                for idx, (user_id, balance) in enumerate(money_top, 1):
-                    try:
-                        user = await bot.fetch_user(int(user_id))
-                        money_desc.append(f"{idx}. {user.display_name} — {balance} монет")
-                    except Exception:
-                        money_desc.append(f"{idx}. [Неизвестный] — {balance} монет")
-                
-                embed.add_field(
-                    name="💰 Богатейшие игроки",
-                    value="\n".join(money_desc),
-                    inline=False
-                )
-
-            embed.set_footer(text=f"Показано топ-{top_n} игроков")
-            await ctx.send(embed=embed)
-
-        except sqlite3.Error as e:
-            print(f"[ОШИБКА БД] Ошибка таблицы лидеров: {e}")
-            await ctx.send("❌ Произошла ошибка при получении данных из базы.")
-        except Exception as e:
-            print(f"[ОШИБКА] Непредвиденная ошибка: {e}")
-            await ctx.send("❌ Произошла непредвиденная ошибка.")
             
+            embed = discord.Embed(title="🏆 Таблица лидеров", color=0xFFD700)
+            
+            leaderboard = []
+            for idx, (user_id, balance) in enumerate(cursor.fetchall(), 1):
+                try:
+                    user = await bot.fetch_user(int(user_id))
+                    leaderboard.append(f"{idx}. {user.display_name} — {balance} монет")
+                except:
+                    leaderboard.append(f"{idx}. [Неизвестный] — {balance} монет")
+            
+            embed.add_field(
+                name="💰 Богатейшие игроки",
+                value="\n".join(leaderboard) or "Нет данных",
+                inline=False
+            )
+            
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send("❌ Произошла ошибка при получении данных")
+
+    class RoleShopView(View):
+        """View для магазина ролей"""
+        def __init__(self, ctx, db):
+            super().__init__(timeout=180)
+            self.ctx = ctx
+            self.db = db
+            self.load_buttons()
+        
+        def load_buttons(self):
+            """Загружает кнопки для ролей"""
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT role_name, price FROM role_shop")
+            
+            for role_name, price in cursor.fetchall():
+                button = Button(
+                    label=f"Купить {role_name} ({price} монет)",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"role_{role_name}_{int(time.time())}"
+                )
+                button.callback = self.create_callback(role_name, price)
+                self.add_item(button)
+        
+        def create_callback(self, role_name: str, price: int):
+            """Создает callback для кнопки"""
+            async def callback(interaction: discord.Interaction):
+                if interaction.user != self.ctx.author:
+                    return await interaction.response.send_message(
+                        "❌ Это не ваш магазин!", ephemeral=True)
+                
+                user_id = str(interaction.user.id)
+                user = self.db.get_user(user_id)
+                role = discord.utils.get(interaction.guild.roles, name=role_name)
+                
+                if not role:
+                    return await interaction.response.send_message(
+                        f"❌ Роль {role_name} не найдена!", ephemeral=True)
+                
+                if role in interaction.user.roles:
+                    return await interaction.response.send_message(
+                        f"❌ У вас уже есть роль {role_name}!", ephemeral=True)
+                
+                if user['balance'] < price:
+                    return await interaction.response.send_message(
+                        f"❌ Недостаточно монет! Нужно {price}", ephemeral=True)
+                
+                try:
+                    self.db.update_balance(user_id, -price)
+                    await interaction.user.add_roles(role)
+                    await interaction.response.send_message(
+                        f"✅ Вы купили роль {role_name} за {price} монет!", 
+                        ephemeral=True)
+                except Exception as e:
+                    await interaction.response.send_message(
+                        f"❌ Ошибка: {str(e)}", ephemeral=True)
+            
+            return callback
+
     @bot.command(name="roleshop")
     async def roleshop(ctx):
-        class RoleShopView(View):
-            def __init__(self):
-                super().__init__(timeout=None)
-                self.load_roles()
-            
-            def load_roles(self):
-                try:
-                    cursor = db.conn.cursor()
-                    cursor.execute("SELECT role_name, price FROM role_shop")
-                    self.roles = cursor.fetchall()
-                except sqlite3.Error as e:
-                    print(f"[ERROR] Ошибка при загрузке ролей: {e}")
-                    self.roles = []
-
-            async def create_button_callback(self, role_name: str, price: int):
-                async def button_callback(interaction: discord.Interaction):
-                    user_id = str(interaction.user.id)
-                    guild = interaction.guild
-                    role = discord.utils.get(guild.roles, name=role_name)
-
-                    if not role:
-                        await interaction.response.send_message(
-                            f"❌ Роль `{role_name}` не найдена на этом сервере.",
-                            ephemeral=True
-                        )
-                        return
-
-                    if role in interaction.user.roles:
-                        await interaction.response.send_message(
-                            f"❌ У вас уже есть роль `{role_name}`.",
-                            ephemeral=True
-                        )
-                        return
-
-                    user = db.get_user(user_id)
-                    if not user:
-                        db.create_user(user_id)
-                        user = db.get_user(user_id)
-
-                    if user['balance'] < price:
-                        await interaction.response.send_message(
-                            f"❌ Недостаточно монет для покупки `{role_name}`.",
-                            ephemeral=True
-                        )
-                        return
-
-                    db.update_balance(user_id, -price)
-                    try:
-                        await interaction.user.add_roles(role)
-                        await interaction.response.send_message(
-                            f"✅ Вы купили роль `{role_name}` за {price} монет!",
-                            ephemeral=True
-                        )
-                    except discord.Forbidden:
-                        await interaction.response.send_message(
-                            "❌ Не удалось выдать роль — недостаточно прав.",
-                            ephemeral=True
-                        )
-                    except Exception as e:
-                        print(f"[ERROR] Ошибка при выдаче роли: {e}")
-                        await interaction.response.send_message(
-                            "❌ Произошла ошибка при покупке роли.",
-                            ephemeral=True
-                        )
-                return button_callback
-
-        embed = discord.Embed(title="🎖️ Магазин ролей", color=0x00ff00)
-        view = RoleShopView()
-
-        try:
-            cursor = db.conn.cursor()
-            cursor.execute("SELECT role_name, price FROM role_shop")
-            roles = cursor.fetchall()
-
-            if not roles:
-                embed.description = "В магазине пока нет ролей."
-                await ctx.send(embed=embed)
-                return
-
-            description_lines = []
-
-            for role_name, price in roles:
-                role = discord.utils.get(ctx.guild.roles, name=role_name)
-                if role:
-                    description_lines.append(f"{role.mention} — {price} монет")
-                else:
-                    description_lines.append(f"`{role_name}` — {price} монет (роль не найдена)")
-
-                button = Button(
-                    label=f"Купить {role_name}",
-                    style=discord.ButtonStyle.primary,
-                    custom_id=f"buy_{role_name}"
-                )
-                button.callback = await view.create_button_callback(role_name, price)
-                view.add_item(button)
-
-            embed.description = "\n".join(description_lines)
-            await ctx.send(embed=embed, view=view)
-        except sqlite3.Error as e:
-            print(f"[ERROR] Ошибка при отображении магазина ролей: {e}")
-            await ctx.send("❌ Не удалось загрузить магазин ролей.")
-            
-    # Автоматическое начисление коинов за время на сервере
-    def credit_time_based_coins(user_id, stats):
-        join_ts = stats.get("join_timestamp")
-        if not join_ts:
-            return 0
-
-        credited_hours = stats.get("credited_hours", 0)
-        total_hours = int((time.time() - join_ts) / 3600)
-        delta_hours = total_hours - credited_hours
-
-        if delta_hours <= 0:
-            return 0
-
-        reward = delta_hours * 6
-        try:
-            db.update_balance(user_id, reward)
-            db.conn.execute("""
-                UPDATE user_stats SET credited_hours = ? WHERE user_id = ?
-            """, (total_hours, user_id))
-            db.conn.commit()
-        except sqlite3.Error as e:
-            print(f"[ERROR] Ошибка при начислении пассивных коинов: {e}")
-            return 0
-
-        return reward
+        """Магазин ролей сервера"""
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT role_name, price FROM role_shop")
+        roles = cursor.fetchall()
+        
+        if not roles:
+            return await ctx.send("🛒 Магазин ролей пуст!")
+        
+        embed = discord.Embed(title="🎖️ Магазин ролей", color=0x00FF00)
+        description = []
+        
+        for role_name, price in roles:
+            role = discord.utils.get(ctx.guild.roles, name=role_name)
+            if role:
+                description.append(f"{role.mention} — {price} монет")
+            else:
+                description.append(f"`{role_name}` — {price} монет (роль не найдена)")
+        
+        embed.description = "\n".join(description)
+        await ctx.send(embed=embed, view=RoleShopView(ctx, db))
