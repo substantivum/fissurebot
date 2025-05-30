@@ -24,62 +24,50 @@ def setup(bot, db):
         # Continue processing other commands
         await bot.process_commands(message)
 
-    @bot.command(name="level")
-    async def level(ctx, member: discord.Member = None):
+    @bot.command(name="stats")
+    async def stats(ctx, member: discord.Member = None):
         target = member or ctx.author
         user_id = str(target.id)
-        stats = db.get_user_stats(user_id)
-        user_data = db.get_user(user_id)
-        current_level = user_data["level"]
-        current_exp = user_data["experience"]
+        
+        # Получаем данные с проверкой на существование
+        user_data = db.get_user(user_id) or {
+            "level": 1,
+            "experience": 0,
+            "balance": 0
+        }
+        stats = db.get_user_stats(user_id) or {
+            "messages": 0,
+            "join_timestamp": time.time(),
+            "daily_streak": 0
+        }
+
+        # Рассчитываем необходимые значения
+        current_level = user_data.get("level", 1)
+        current_exp = user_data.get("experience", 0)
         needed_exp = get_required_exp(current_level)
-
-        embed = discord.Embed(title=f"📊 Уровень {target.display_name}", color=0x00ffcc)
-        embed.add_field(name="🏆 Уровень", value=str(current_level), inline=False)
-        embed.add_field(name="✨ Опыт", value=f"{current_exp} / {needed_exp}", inline=False)
-        embed.add_field(name="💬 Сообщения", value=str(stats["messages"]), inline=False)
-        await ctx.send(embed=embed)
-
-    @bot.command(name="activity")
-    async def activity(ctx, member: discord.Member = None):
-        target = member or ctx.author
-        user_id = str(target.id)
-        stats = db.get_user_stats(user_id)
-        user_data = db.get_user(user_id)
-        total_time = time.time() - stats["joined_at"]
+        total_time = time.time() - stats.get("join_timestamp", time.time())
         days, remainder = divmod(total_time, 86400)
         hours, _ = divmod(remainder, 3600)
 
-        embed = discord.Embed(title=f"📈 Активность {target.display_name}", color=0x00ffcc)
-        embed.add_field(name="🕒 Время на сервере", value=f"{int(days)}д {int(hours)}ч", inline=False)
-        embed.add_field(name="✉️ Сообщения", value=str(stats["messages"]), inline=False)
-        embed.add_field(name="✨ Опыт", value=str(user_data["experience"]), inline=False)
-        await ctx.send(embed=embed)
+        # Создаем embed
+        embed = discord.Embed(
+            title=f"📊 Статистика {target.display_name}",
+            color=0x00ffcc
+        )
+        
+        # Добавляем поля с информацией
+        embed.add_field(name="🏆 Уровень", value=str(current_level), inline=True)
+        embed.add_field(name="✨ Опыт", value=f"{current_exp}/{needed_exp}", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Пустое поле для выравнивания
+        
+        embed.add_field(name="💬 Сообщения", value=str(stats.get("messages", 0)), inline=True)
+        embed.add_field(name="🕒 На сервере", value=f"{int(days)}д {int(hours)}ч", inline=True)
+        embed.add_field(name="💰 Баланс", value=f"{user_data.get('balance', 0)} монет", inline=True)
 
-    @bot.command(name="topactivity")
-    async def top_activity(ctx, top_n: int = 10):
-        cursor = db.conn.cursor()
-        cursor.execute("""
-            SELECT u.user_id, u.experience, s.messages
-            FROM users u
-            LEFT JOIN user_stats s ON u.user_id = s.user_id
-            ORDER BY u.experience + IFNULL(s.messages, 0) DESC
-            LIMIT ?
-        """, (top_n,))
-        top_users = cursor.fetchall()
-
-        if not top_users:
-            await ctx.send("❌ Нет данных по активности.")
-            return
-
-        embed = discord.Embed(title="🏆 Топ по активности", color=0xFFD700)
-        for idx, (user_id, exp, messages) in enumerate(top_users, 1):
-            try:
-                user = await bot.fetch_user(int(user_id))
-                total = exp + (messages or 0)
-                embed.add_field(name=f"{idx}. {user.display_name}", value=f"Очки активности: {total}", inline=False)
-            except Exception as e:
-                print(f"Error fetching user {user_id}: {e}")
+        # Добавляем прогресс-бар уровня
+        progress = min(current_exp / needed_exp, 1.0)
+        progress_bar = f"[{'█' * int(progress * 20)}{'░' * (20 - int(progress * 20))}] {progress*100:.1f}%"
+        embed.add_field(name="Прогресс уровня", value=progress_bar, inline=False)
 
         await ctx.send(embed=embed)
 

@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 import time
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict
 
 logger = logging.getLogger('FissureBot')
 
@@ -86,11 +86,12 @@ class BotDatabase:
 
     # User methods
     def get_user(self, user_id: str) -> Optional[Dict]:
-        """Получает данные пользователя"""
+        """Gets user data safely"""
         try:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-            return dict(cursor.fetchone()) if cursor.fetchone() else None
+            row = cursor.fetchone()
+            return dict(row) if row else None
         except sqlite3.Error as e:
             logger.error(f"Error getting user {user_id}: {e}")
             return None
@@ -140,12 +141,13 @@ class BotDatabase:
                 logger.error(f"Error updating XP for {user_id}: {e}")
 
     # Statistics methods
-    def get_user_stats(self, user_id: str) -> Optional[Dict]:
-        """Получает статистику пользователя"""
+    def get_user_stats(self, user_id: str) -> Optional[dict]:
+        """Get user stats safely"""
         try:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM user_stats WHERE user_id = ?", (user_id,))
-            return dict(cursor.fetchone()) if cursor.fetchone() else None
+            row = cursor.fetchone()
+            return dict(row) if row else None
         except sqlite3.Error as e:
             logger.error(f"Error getting stats for {user_id}: {e}")
             return None
@@ -275,3 +277,15 @@ class BotDatabase:
                 )
             except sqlite3.Error as e:
                 logger.error(f"Error setting join timestamp for {user_id}: {e}")
+                
+                
+    def update_level_and_exp(self, user_id: str, level: int, experience: int):
+        """Обновляет уровень и опыт пользователя"""
+        cursor = self.conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        cursor.execute("""
+            UPDATE users
+            SET level = ?, experience = ?
+            WHERE user_id = ?
+        """, (level, experience, user_id))
+        self.conn.commit()

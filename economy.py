@@ -90,21 +90,24 @@ def setup(bot, db):
 
     @bot.command(name="fissdaily")
     async def daily(ctx):
-        """Ежедневная награда"""
         user_id = str(ctx.author.id)
+        
+        # Ensure user exists
+        if not db.get_user(user_id):
+            db.create_user(user_id)
+        
+        # Get fresh data after potential creation
         user_data = db.get_user(user_id)
         stats = db.get_user_stats(user_id)
-
+        
         if not user_data or not stats:
-            db.create_user(user_id)
-            user_data = db.get_user(user_id)
-            stats = db.get_user_stats(user_id)
+            await ctx.send("❌ Не удалось загрузить данные пользователя. Попробуйте снова.")
+            return
 
         now = int(time.time())
-        last_daily = stats.get('last_daily', 0)
+        last_daily = stats.get("last_daily", 0)
         elapsed = now - last_daily
 
-        # Проверка кулдауна
         if elapsed < DAILY_COOLDOWN:
             remaining = DAILY_COOLDOWN - elapsed
             hours, rem = divmod(remaining, 3600)
@@ -112,30 +115,32 @@ def setup(bot, db):
             await ctx.send(f"⏳ Вы сможете получить награду через {hours}ч {minutes}м")
             return
 
-        # Обновляем стрик
-        streak = stats.get('daily_streak', 0)
+        streak = stats.get("daily_streak", 0)
         if elapsed < 2 * DAILY_COOLDOWN:
             streak = (streak % 7) + 1
         else:
             streak = 1
 
-        # Награды за стрик
         base_rewards = [45, 50, 55, 60, 65, 70, 75]
         base_reward = base_rewards[min(streak - 1, 6)]
-        total_reward = base_reward + user_data['level']
+        total_reward = base_reward + user_data['level'] + streak
 
-        # Обновляем данные
-        db.update_balance(user_id, total_reward)
-        db.conn.execute(
-            "UPDATE user_stats SET last_daily = ?, daily_streak = ? WHERE user_id = ?",
-            (now, streak, user_id)
-        )
-        db.conn.commit()
-
-        await ctx.send(
-            f"🎁 День {streak}/7: Вы получили {base_reward} монет + {user_data['level']} за уровень = **{total_reward} монет**\n"
-            f"Ваш новый баланс: {user_data['balance'] + total_reward}"
-        )
+        try:
+            with db.conn:
+                db.update_balance(user_id, total_reward)
+                db.conn.execute("""
+                    UPDATE user_stats 
+                    SET last_daily = ?, daily_streak = ? 
+                    WHERE user_id = ?
+                """, (now, streak, user_id))
+            
+            await ctx.send(
+                f"🎁 День {streak}/7: Вы получили {base_reward} монет + {user_data['level']} за уровень + {streak} за ежедневную команду = **{total_reward} монет**\n"
+                f"Ваш новый баланс: {user_data['balance'] + total_reward}"
+            )
+        except Exception as e:
+            await ctx.send("❌ Произошла ошибка при обработке ежедневной награды")
+            logger.error(f"Daily command error: {e}")
 
     @bot.command(name="balance")
     async def balance(ctx, member: Optional[discord.Member] = None):
