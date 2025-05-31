@@ -31,6 +31,7 @@ class BotDatabase:
                     daily_streak INTEGER DEFAULT 0,
                     last_daily REAL DEFAULT 0,
                     join_timestamp INTEGER,
+                    time_first_message INTEGER,
                     credited_hours INTEGER DEFAULT 0,
                     FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
@@ -83,6 +84,7 @@ class BotDatabase:
                     self.conn.execute(schema)
                 except sqlite3.Error as e:
                     logger.error(f"Error creating {table}: {e}")
+
 
     # User methods
     def get_user(self, user_id: str) -> Optional[Dict]:
@@ -289,3 +291,14 @@ class BotDatabase:
             WHERE user_id = ?
         """, (level, experience, user_id))
         self.conn.commit()
+        
+    def add_first_message_time(self, user_id: str, timestamp: int) -> None:
+        with self.conn:
+            try:
+                self.conn.execute(
+                    "UPDATE user_stats SET time_first_message = ? WHERE user_id = ?",
+                    (int(time.time()), user_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Error setting first message timestamp for {user_id}: {e}")
+            

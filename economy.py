@@ -5,9 +5,10 @@ import sqlite3
 import random
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from typing import Optional
+
 
 # Константы
 DAILY_COOLDOWN = 24 * 60 * 60  # 24 часа в секундах
@@ -60,33 +61,39 @@ def setup(bot, db):
                 word = ''.join(c for c in word if c.isalnum())
                 if len(word) >= 4:  # Игнорируем короткие слова
                     db.track_word(user_id, word)
+                    
+        if not db.get_user(user_id):
+            db.create_user(user_id)
+            db.add_first_message_time(user_id)
 
     def calculate_passive_income(user_id: str) -> int:
-        """Рассчитывает пассивный доход пользователя"""
         stats = db.get_user_stats(user_id)
-        if not stats or not stats.get('join_timestamp'):
-            return 0
-            
+        if not stats or not stats.get('time_first_message'):
+            return 0  # No first message = no income
+
         credited_hours = stats.get('credited_hours', 0)
-        total_hours = int((time.time() - stats['join_timestamp']) / 3600)
-        delta_hours = total_hours - credited_hours
-        
-        if delta_hours <= 0:
+        time_first_message = int(stats['time_first_message'])
+
+        # Calculate total hours since the first message
+        total_hours = int((time.time() - time_first_message) // 3600)
+        new_hours = total_hours - credited_hours
+
+        if new_hours <= 0:
             return 0
-            
-        reward = delta_hours * PASSIVE_INCOME_RATE
+
+        reward = new_hours * PASSIVE_INCOME_RATE
         try:
-            db.update_balance(user_id, reward)
-            db.conn.execute(
-                "UPDATE user_stats SET credited_hours = ? WHERE user_id = ?",
-                (total_hours, user_id)
-            )
-            db.conn.commit()
+            with db.conn:
+                db.update_balance(user_id, reward)
+                db.conn.execute(
+                    "UPDATE user_stats SET credited_hours = ? WHERE user_id = ?",
+                    (credited_hours + new_hours, user_id)
+                )
+            return reward
         except sqlite3.Error as e:
-            print(f"[ERROR] Ошибка начисления пассивного дохода: {e}")
+            logger.error(f"Passive income error: {e}")
             return 0
-            
-        return reward
+
 
     @bot.command(name="fissdaily")
     async def daily(ctx):
