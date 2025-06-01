@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import random
 import time
@@ -9,7 +10,8 @@ pending_duels = {}
 COOLDOWN = 3600  # 1 час в секундах
 
 def setup(bot, db):
-    @bot.command(name="duel")
+    @bot.command(name="duel", description="Вызови одного из участников сервера на дуэль!")
+    @app_commands.describe(opponent="Тэг оппонента", bet="Ставка")
     async def duel(ctx, opponent: discord.Member, bet: int):
         challenger_id = str(ctx.author.id)
         opponent_id = str(opponent.id)
@@ -56,7 +58,7 @@ def setup(bot, db):
         # Обновляем время последнего использования команды
         db.update_last_used(challenger_id, "duel")
 
-    @bot.command(name="accept")
+    @bot.command(name="accept", description="Принять вызов")
     async def accept(ctx):
         user_id = str(ctx.author.id)
 
@@ -92,7 +94,8 @@ def setup(bot, db):
         embed.add_field(name="💰 Ставка", value=f"{bet} монет", inline=False)
         await channel.send(embed=embed)
 
-    @bot.command()
+    @bot.command(name="coinflip")
+    @app_commands.describe(amount="Количество монет")
     async def coinflip(ctx, amount: int):
         """50/50 шанс удвоить ставку"""
         user_id = str(ctx.author.id)

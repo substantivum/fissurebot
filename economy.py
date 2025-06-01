@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 from discord.ui import View, Button
 import sqlite3
@@ -13,7 +14,7 @@ from typing import Optional
 # Константы
 DAILY_COOLDOWN = 24 * 60 * 60  # 24 часа в секундах
 EMOJI_REGEX = re.compile(r'<a?:(\w+):\d+>|[\U00010000-\U0010ffff]')
-PASSIVE_INCOME_RATE = 6  # монет в час за онлайн
+PASSIVE_INCOME_RATE = 6  # fisscoins в час за онлайн
 
 def setup(bot, db):
     @bot.event
@@ -142,7 +143,7 @@ def setup(bot, db):
                 """, (now, streak, user_id))
             
             await ctx.send(
-                f"🎁 День {streak}/7: Вы получили {base_reward} монет + {user_data['level']} за уровень + {streak} за ежедневную команду = **{total_reward} монет**\n"
+                f"🎁 День {streak}/7: Вы получили {base_reward} fisscoins + {user_data['level']} за уровень + {streak} за ежедневную команду = **{total_reward} fisscoins**\n"
                 f"Ваш новый баланс: {user_data['balance'] + total_reward}"
             )
         except Exception as e:
@@ -163,7 +164,7 @@ def setup(bot, db):
         passive_income = calculate_passive_income(user_id)
         total_balance = user['balance'] + passive_income
         
-        await ctx.send(f"💰 {target.display_name} имеет {total_balance} монет.")
+        await ctx.send(f"💰 {target.display_name} имеет {total_balance} fisscoins.")
 
     @bot.command(name="leaderboard")
     async def leaderboard(ctx, top_n: int = 10):
@@ -184,9 +185,9 @@ def setup(bot, db):
             for idx, (user_id, balance) in enumerate(cursor.fetchall(), 1):
                 try:
                     user = await bot.fetch_user(int(user_id))
-                    leaderboard.append(f"{idx}. {user.display_name} — {balance} монет")
+                    leaderboard.append(f"{idx}. {user.display_name} — {balance} fisscoins")
                 except:
-                    leaderboard.append(f"{idx}. [Неизвестный] — {balance} монет")
+                    leaderboard.append(f"{idx}. [Неизвестный] — {balance} fisscoins")
             
             embed.add_field(
                 name="💰 Богатейшие игроки",
@@ -213,7 +214,7 @@ def setup(bot, db):
             
             for role_name, price in cursor.fetchall():
                 button = Button(
-                    label=f"Купить {role_name} ({price} монет)",
+                    label=f"Купить {role_name} ({price} fisscoins)",
                     style=discord.ButtonStyle.primary,
                     custom_id=f"role_{role_name}_{int(time.time())}"
                 )
@@ -223,9 +224,6 @@ def setup(bot, db):
         def create_callback(self, role_name: str, price: int):
             """Создает callback для кнопки"""
             async def callback(interaction: discord.Interaction):
-                if interaction.user != self.ctx.author:
-                    return await interaction.response.send_message(
-                        "❌ Это не ваш магазин!", ephemeral=True)
                 
                 user_id = str(interaction.user.id)
                 user = self.db.get_user(user_id)
@@ -241,13 +239,13 @@ def setup(bot, db):
                 
                 if user['balance'] < price:
                     return await interaction.response.send_message(
-                        f"❌ Недостаточно монет! Нужно {price}", ephemeral=True)
+                        f"❌ Недостаточно fisscoins! Нужно {price}", ephemeral=True)
                 
                 try:
                     self.db.update_balance(user_id, -price)
                     await interaction.user.add_roles(role)
                     await interaction.response.send_message(
-                        f"✅ Вы купили роль {role_name} за {price} монет!", 
+                        f"✅ Вы купили роль {role_name} за {price} fisscoins!", 
                         ephemeral=True)
                 except Exception as e:
                     await interaction.response.send_message(
@@ -256,24 +254,22 @@ def setup(bot, db):
             return callback
 
     @bot.command(name="roleshop")
+    @commands.has_permissions(administrator=True)
     async def roleshop(ctx):
-        """Магазин ролей сервера"""
+        """Магазин ролей сервера (доступен только администраторам)"""
         cursor = db.conn.cursor()
         cursor.execute("SELECT role_name, price FROM role_shop")
         roles = cursor.fetchall()
-        
         if not roles:
             return await ctx.send("🛒 Магазин ролей пуст!")
-        
+
         embed = discord.Embed(title="🎖️ Магазин ролей", color=0x00FF00)
         description = []
-        
         for role_name, price in roles:
             role = discord.utils.get(ctx.guild.roles, name=role_name)
             if role:
-                description.append(f"{role.mention} — {price} монет")
+                description.append(f"{role.mention} — {price} fisscoins")
             else:
-                description.append(f"`{role_name}` — {price} монет (роль не найдена)")
-        
+                description.append(f"`{role_name}` — {price} fisscoins (роль не найдена)")
         embed.description = "\n".join(description)
         await ctx.send(embed=embed, view=RoleShopView(ctx, db))

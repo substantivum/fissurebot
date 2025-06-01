@@ -1,9 +1,13 @@
 # main.py
 import os
+import asyncio
+import discord
 from dotenv import load_dotenv
 from discord import Intents
 from discord.ext import commands
+from utils import logger
 
+ALLOWED_CHANNEL_IDS = [1367800241029644310, 1375854037811069009]
 load_dotenv()
 
 # Настройка интентов
@@ -15,12 +19,26 @@ intents.reactions = True
 
 # Инициализация бота
 TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD= discord.Object(int(os.getenv("GUILD_ID")))
 bot = commands.Bot(
     command_prefix="!",
     intents=intents,
     help_command=None  # This completely disables the default help
 )
 
+@bot.before_invoke
+async def ensure_correct_channel(ctx):
+    if ctx.channel.id not in ALLOWED_CHANNEL_IDS:
+        # Отправляем сообщение и запоминаем его
+        msg = await ctx.send(f"❌ Команды можно использовать только в специальных каналах")
+        # Устанавливаем таймер на удаление через 10 секунд
+        await asyncio.sleep(10)
+        try:
+            await msg.delete()
+        except discord.NotFound:
+            pass  # Сообщение уже удалено или не найдено
+        raise commands.CommandError("Команда вызвана не в том канале")
+        
 # Импорты модулей (после создания бота)
 import levels
 from database import BotDatabase
@@ -45,6 +63,12 @@ setup_admin(bot, db)
 setup_levels(bot, db)
 setup_games(bot, db)
 setup_rooms(bot)
+
+# @bot.event
+# async def on_ready():
+#     await bot.tree.sync(guild=GUILD)
+#     logger.info("Commands synced to server")
+    
     
 if __name__ == "__main__":
     try:

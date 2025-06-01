@@ -1,5 +1,6 @@
 import discord
 from discord.ui import View, Button, Modal, TextInput
+from discord import app_commands
 from database import BotDatabase
 from utils import logger
 from discord.ext import commands  # Обязательно добавьте этот импорт
@@ -47,10 +48,9 @@ def setup(bot, db):
             ],
             "📊 Уровни и статистика": [
                 {"name": "leaderboard", "description": "Посмотреть таблицу лидеров", "usage": "!leaderboard"},
-                {"name": "stats", "description": "Показать личную статистику пользователя", "usage": "!mystats"}
+                {"name": "stats", "description": "Показать личную статистику пользователя", "usage": "!stats"}
             ],
             "🎮 Развлечения": [
-                {"name": "roleshop", "description": "Посмотреть и купить роли в магазине", "usage": "!roleshop"},
                 {"name": "duel", "description": "Вызвать пользователя на дуэль с монетами", "usage": "!duel @пользователь 50"},
                 {"name": "accept", "description": "Принять вызов на дуэль", "usage": "!accept"},
                 {"name": "coinflip", "description": "Сыграть в орёл/решка за удвоение ставки", "usage": "!coinflip 100"}
